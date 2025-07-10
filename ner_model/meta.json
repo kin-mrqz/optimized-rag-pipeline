@@ -18,12 +18,10 @@
   },
   "labels":{
     "ner":[
-      "description_phrase",
-      "occasion",
-      "pairing_item",
-      "price",
-      "region",
-      "wine_name"
+      "max_price",
+      "min_price",
+      "wine_name",
+      "wine_type"
     ]
   },
   "pipeline":[
