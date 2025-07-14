@@ -7,7 +7,15 @@ I will be using HyDE (Hypothetical Document Embeddings, after filtering the meta
 - Next, this is embedded and a similarity search is performed between the HyDE and top k filtered wines.
 - Finally, RAG model using Bedrock LLMs will be used to generate reasoning for the suggested top 5 wines.
 
-### Current problems (optimization):
-- initial filter. implement re-ranking, make more inclusive (rn only first 20 valid entries), prepare backup for faulty filters
-- nlp model. train intent recognition and NER model on more data. Possibly create annotation tools.
-- RAG for reasoning of wine suggestions. try using AWS Bedrock
+## Current problems (optimization):
+### 1. Initial Filter
+- implement re-ranking, make more inclusive (rn only first 20 valid entries) -> train custom re-ranker model
+- fix some issues with filtering wine types
+
+### 2. Nlp model. 
+- train intent recognition and NER model on more data.
+- add labels
+
+### 3. LLM models
+- explore other LLM models for generating taste profiles and reasoning
+- DeepSeek outperforms Llama in quality of generated taste profiles, despite higher latency
