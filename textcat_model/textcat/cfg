@@ -1,8 +1,0 @@
-{
-  "labels":[
-    "recommend_wine",
-    "recommend_food"
-  ],
-  "threshold":0.0,
-  "positive_label":null
-}

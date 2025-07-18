@@ -19,3 +19,8 @@ I will be using HyDE (Hypothetical Document Embeddings, after filtering the meta
 ### 3. LLM models
 - explore other LLM models for generating taste profiles and reasoning
 - DeepSeek outperforms Llama in quality of generated taste profiles, despite higher latency
+
+## Cloud Deployment
+- refactored code wrapped with endpoints using FastAPI, to be stored inside a Docker image
+- use Mangum as API handler adapter to ensure compatibility with AWS Lambda
+- setup CDK and AWS Lambda
