@@ -4,8 +4,10 @@ import json
 import time
 import random
 import numpy as np
+from typing import List
 from functools import wraps
 from statistics import quantiles
+from dataclasses import dataclass
 from rag_setup.get_rag_setup import rag_system_setup
 from rag_setup.get_embedding import get_embedding_model
 
@@ -21,6 +23,11 @@ food_json = None
 wine_log_times = {}
 food_log_times = {}
 
+@dataclass
+class QueryResponse:
+    query_text: str
+    response_text: str
+    sources: List[str] = None
 
 # Utility Functions
 def normalize(text):
@@ -657,7 +664,7 @@ def ask_wine_secret(query, retriever, llm, top_k=5):
     return results
     
 
-def query_prompt(user_query: Optional[str] = None):
+def query_prompt(user_query: Optional[str] = None) -> QueryResponse:
     global llm, retriever, nlp_textcat, nlp_ner_wine, nlp_ner_food, wine_json, food_json
     
     llm = setup_llm()
@@ -665,9 +672,14 @@ def query_prompt(user_query: Optional[str] = None):
     
     if not user_query:
         user_query = input("Ask a question about wine-food pairing: ")
-    result = ask_wine_secret(user_query, retriever=retriever, llm=llm, top_k=5)
+    response_text = ask_wine_secret(user_query, retriever=retriever, llm=llm, top_k=5)
+    sources = [] # Placeholder for sources, not yet implemented
 
-    return result
+    return QueryResponse(
+        query_text=user_query,
+        response_text=response_text,
+        sources=sources
+    )
 
 
 if __name__ == "__main__":
