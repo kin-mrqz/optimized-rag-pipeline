@@ -11,7 +11,7 @@ def rag_system_setup():
 
     persist_dir = "chroma_db"
     if os.path.exists(persist_dir):
-            vectorstore = load_vectorstore()
+        vectorstore = load_vectorstore()
     else:
         print("No vectorstore found, create a new one.")
         vectorstore = None
