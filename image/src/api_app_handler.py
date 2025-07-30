@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from query_model import QueryModel
 from mangum import Mangum
+import os
 
 app = FastAPI()
 handler = Mangum(app)
@@ -23,11 +24,19 @@ def submit_query(request: SubmitQueryRequest) -> QueryModel:
     new_query = QueryModel(
         query_text = request.query,
         answer_text = response.response_text,
-        # sources = response.sources,
-        sources = response.sources,  # Placeholder for sources, not yet implemented
+        variant_id = response.variant_id,
+        is_descriptive = response.is_descriptive, # helps in formatting response
+        sources = response.sources,  
         is_complete = True
     )
-    new_query.put_item()
+    try:
+        new_query.put_item()
+        print("✅ Query saved to DynamoDB")
+        
+    except Exception as e:
+        print(f"⚠️  Warning: Could not save to DynamoDB: {str(e)}")
+        print("   This is normal for local development without DynamoDB setup")
+        # Continue without failing the request
 
     return new_query
 

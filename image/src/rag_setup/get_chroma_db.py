@@ -21,20 +21,20 @@ def load_vectorstore():
         persist_directory=get_runtime_chroma_path(),
         embedding_function=get_embedding_model(),
         )
+
+        # print(f"✅ Init ChromaDB {CHROMA_DB_INSTANCE} from {get_runtime_chroma_path()}")
     return CHROMA_DB_INSTANCE
 
 
 def copy_to_temp():
     dst_chroma_path = get_runtime_chroma_path()
-    if not os.path.exists(dst_chroma_path):
-        os.makedirs(dst_chroma_path)
+    # print(f"Copying ChromaDB from {CHROMA_PATH} to {dst_chroma_path}")
 
-    tmp_contents = os.listdir(dst_chroma_path)
-    if len(tmp_contents) > 0:
-        os.makedirs(dst_chroma_path, exist_ok=True)
-        shutil.copytree(CHROMA_PATH, dst_chroma_path, dirs_exist_ok=True)
-    else:
-        print(f"Chroma DB already exists in {dst_chroma_path}, skipping copy.")
+    # note: this will overwrite the existing directory in /tmp
+    if os.path.exists(dst_chroma_path):
+        shutil.rmtree(dst_chroma_path)
+    shutil.copytree(CHROMA_PATH, dst_chroma_path)
+    # print("✅ ChromaDB copied successfully.")
 
 
 def get_runtime_chroma_path():

@@ -16,6 +16,8 @@ llm = None
 embd = get_embedding_model()
 retriever = None
 nlp_textcat = None
+nlp_textcat_wine_intent = None
+nlp_textcat_food_intent = None
 nlp_ner_food = None
 nlp_ner_wine = None
 wine_json = None
@@ -25,9 +27,14 @@ food_log_times = {}
 
 @dataclass
 class QueryResponse:
-    query_text: str
-    response_text: str
-    sources: List[str] = None
+    query_text: str                # User Query
+    response_text: str             # LLM Response
+    variant_id: List[int] = None   # List of variant IDs (if applicable)
+    is_descriptive: bool = False   # Whether the response is descriptive or not
+    sources: List[str] = None      # List of sources (if applicable)
+
+    # Whether no valid results were found (product randomly sampled)
+    # none_found: bool = False   # currently integrated in the response_text  
 
 # Utility Functions
 def normalize(text):
@@ -83,33 +90,51 @@ def recommend_wine(query:str):
     else:
         return False
 
-def get_price(wine, price_field="price"):
-    price_str = wine.get(price_field, "0")
-    if not isinstance(price_str, str):
-        price_str = str(price_str)
-    # Remove commas, spaces, and common currency symbols
-    cleaned = price_str.replace(",", "").replace(" ", "").replace("$", "").replace("HKD", "")
-    try:
-        return float(cleaned)
-    except (ValueError, TypeError):
-        return 0.0
-
 # for listed prices such as 150 - 200
 def parse_average_price(value):
     if isinstance(value, str):
         value = value.strip()
+
         # Match range: "150-200", "150 - 200"
-        range_match = re.match(r"^(\d+)\s*-\s*(\d+)$", value)
+        range_match = re.match(r"^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$", value)
         if range_match:
             low, high = map(float, range_match.groups())
             return (low + high) / 2
-        # Match single number: "150"
-        elif re.match(r"^\d+(\.\d+)?$", value):
+
+        # Match single number: "150" or "150.50"
+        if re.match(r"^\d+(\.\d+)?$", value):
             return float(value)
+
     return None
+
+def get_price(wine, price_field="price"):
+    price_str = wine.get(price_field, "0")
+    
+    if not isinstance(price_str, str):
+        price_str = str(price_str)
+
+    # Remove commas, spaces, and currency symbols
+    cleaned = re.sub(r"[^\d\.-]", "", price_str)
+
+    parsed_price = parse_average_price(cleaned)
+    if parsed_price is not None:
+        return parsed_price
+    
+    try:
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return 0.0
+    
+# for single prices such as 1,200, etc.
+def parse_price(price):
+    if isinstance(price, float):
+        return price
+    return float(price.replace("$", "").replace("HKD", "").replace(",", ""))
+
 
 def sample_quartiles(wines, price_field="price", k_per_quartile=10):
     prices = [get_price(w, price_field) for w in wines]
+
     if not prices:
         return []
     
@@ -133,10 +158,12 @@ import boto3
 from langchain_aws.llms.bedrock import BedrockLLM
 from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+# print("Loading .env from:", env_path)
 load_dotenv(dotenv_path=env_path)
 
 # Configuration# change to bedrock llm
 AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
+# print(f"AWS_REGION = {AWS_REGION}")
 MODEL_ID = "meta.llama3-70b-instruct-v1:0"
 MODEL_PARAMS = {
     "temperature": 0.2,
@@ -285,6 +312,15 @@ def wine_query_analyzer(query: str):
         
     return WineMetadata(**result)
 
+def wine_intent_analyzer(query: str):
+    """Extracts the intent of the query using a spaCy text classification model.
+    Returns the intent as a string."""
+    doc = nlp_textcat_wine_intent(query)
+    # Find the key with the highest value
+    intent = max(doc.cats, key=doc.cats.get)
+
+    return intent
+
 
 @timed(food_log_times)
 def food_query_analyzer(query: str):
@@ -302,6 +338,14 @@ def food_query_analyzer(query: str):
             result[ent.label_] = ent.text
         
     return FoodMetadata(**result)
+
+def food_intent_analyzer(query: str):
+    """Extracts the intent of the query using a spaCy text classification model.
+    Returns the intent as a string."""
+    doc = nlp_textcat_food_intent(query)
+    # Find the key with the highest value
+    intent = max(doc.cats, key=doc.cats.get)
+    return intent
 
 
 @timed(wine_log_times)
@@ -352,6 +396,7 @@ def filter_wines(data, model_instance, field_map, max_results=20):
                 results.append(wine)
                 if len(results)== max_results:
                     break
+
         return results
 
     # case 2: filter only has wine_type (no price)
@@ -375,6 +420,7 @@ def filter_wines(data, model_instance, field_map, max_results=20):
         sampled += sample_quartiles(type_buckets["red"], price_field, k_per_quartile=10)
         sampled += sample_quartiles(type_buckets["white"], price_field, k_per_quartile=10)
         sampled += sample_quartiles(type_buckets["sparkling"], price_field, k_per_quartile=10)
+
         return sampled[:max_results]
 
 
@@ -402,13 +448,24 @@ def generate_wine_recommendations(filtered, profile, top_k=5):
     and (b) enriched taste profile from query, if present otherwise randomly 
     sample 3 wines (cheapest -> middle -> most expensive)
     """
+
+    # in case no wines are found; set to False as default
+    none_found = False
+
+    # randomly sample wines if no valid wine after filtering
     if len(filtered) == 0:
-        return None
-        
-    if len(filtered) < top_k:
-        return filtered
-        
-    if profile:
+        none_found = True
+        sorted_wines = sorted(wine_json, key=lambda x: float(parse_price(x["WS Retail Price"])))
+        n = len(sorted_wines)
+        step = max(1, n // top_k)
+        sampled = [random.choice(sorted_wines[i:i+step]) for i in range(0, n, step)][:top_k]
+    
+    # return filtered wines if less than top_k
+    elif len(filtered) < top_k:
+        sampled = filtered
+    
+    # filtered wines are more than top_k and profile is present
+    else:
         embedded_wines = []
         for wine in filtered:
             content = "\n".join(f"{key}: {value}" for key, value in wine.items() if value)
@@ -418,25 +475,36 @@ def generate_wine_recommendations(filtered, profile, top_k=5):
         profile_embed = embd.embed_query(profile)
         scored_embed = [(wine, cosine_similarity(profile_embed, wine_embed)) for wine, wine_embed in embedded_wines]
         top_wines = sorted(scored_embed, key=lambda x: x[1], reverse=True)[:top_k]
-        return [wine for wine, _ in top_wines]
+        sampled = [wine for wine, _ in top_wines]
 
-    else:
-        sorted_wines = sorted(filtered, key=lambda x: float(x.WS_Retail_Price))
-        n = len(sorted_wines)
-        if n == 0:
-            return []
-        step = max(1, n // top_k)
-        sampled = [random.choice(sorted_wines[i:i+step]) for i in range(0, n, step)][:top_k]
-
-        return sampled 
+    return sampled, none_found
 
 
 def ask_wine_ai(question, data, field_map):
     # start_main = time.time()
-    parsed_query = wine_query_analyzer(question)
-    filtered = filter_wines(data=data, model_instance=parsed_query, field_map=field_map)
-    profile = create_wine_taste_profile(question)
-    recommendations = generate_wine_recommendations(filtered, profile)
+
+    # is the query a descriptive or recommendation query?
+    is_descriptive = True
+    intent = wine_intent_analyzer(question)
+    if intent != "description":
+        parsed_query = wine_query_analyzer(question)
+        filtered = filter_wines(data=data, model_instance=parsed_query, field_map=field_map)
+        profile = create_wine_taste_profile(question)
+        response, none_found = generate_wine_recommendations(filtered, profile)
+        is_descriptive = False
+
+    elif intent == "description":
+        none_found = True
+        """generate wine body and flavour profile
+        """
+        response = llm.invoke(f"""
+        You are a master-level chef and food data expert.
+        Your task is to create a short flavor description of the wine (1-2 sentences) and a hypothetical, ideal food profile in the form of structured metadata.
+        Keep your response concise and focused on the dish's key attributes.
+        User Query: {question.strip()}
+
+""")
+
 
     # Print timing summary
     # total_time = round(time.time() - start_main, 4)
@@ -446,8 +514,9 @@ def ask_wine_ai(question, data, field_map):
     #     print(f"  {name}: {duration} seconds")
         
     # print(f"  Total time: {total_time} seconds")
-    
-    return recommendations
+    # print(f"Response: {response}")
+    # print(f"Is descriptive: {is_descriptive}")
+    return response, is_descriptive, none_found
 
 
 @timed(food_log_times)
@@ -499,6 +568,7 @@ def filter_food(data, model_instance, field_map, max_results=20):
                 results.append(food)
                 if len(results)== max_results:
                     break
+
         return results
 
     # case 2: filter only has food_type (no price)
@@ -507,7 +577,7 @@ def filter_food(data, model_instance, field_map, max_results=20):
         type_filtered = [w for w in data if normalize(w.get(field_map["food_type"], "")) == food_type]
         return sample_quartiles(type_filtered, price_field=price_field, k_per_quartile=4)
 
-    # temporary fallback: choose randomly from beef, chicken, and pork dishes
+    # case 3: temporary fallback: choose randomly from beef, chicken, and pork dishes
     else:
         type_buckets = {
             "beef": [],
@@ -520,9 +590,9 @@ def filter_food(data, model_instance, field_map, max_results=20):
                 type_buckets[wt].append(w)
 
         sampled = []
-        sampled += sample_quartiles(type_buckets["beef"], price_field, k_per_quartile=10)
-        sampled += sample_quartiles(type_buckets["chicken"], price_field, k_per_quartile=10)
-        sampled += sample_quartiles(type_buckets["pork"], price_field, k_per_quartile=10)
+        sampled += sample_quartiles(type_buckets["beef"], price_field, k_per_quartile=4)
+        sampled += sample_quartiles(type_buckets["chicken"], price_field, k_per_quartile=4)
+        sampled += sample_quartiles(type_buckets["pork"], price_field, k_per_quartile=4)
         return sampled[:max_results]
 
 
@@ -547,13 +617,25 @@ def generate_food_recommendations(filtered, profile, top_k=5):
     and (b) enriched taste profile from query, if present otherwise randomly 
     sample 3 dishes (cheapest -> middle -> most expensive)
     """
+    # in case no dishes are found; set to False as default
+    none_found = False
+
+    # randomly sample dishes if no valid dish after filtering
     if len(filtered) == 0:
-        return None
+        none_found = True
+        sorted_food = sorted(
+            food_json,
+            key=lambda x: x["Price"]
+        )
+        n = len(sorted_food)
+        step = max(1, n // top_k)
+        sampled = [random.choice(sorted_food[i:i+step]) for i in range(0, n, step)][:top_k]
         
-    if len(filtered) < top_k:
-        return filtered
+    elif len(filtered) < top_k:
+        sampled = filtered
         
-    if profile:
+    # filtered food are more than top_k and profile is present
+    else:
         embedded_food = []
         for food in filtered:
             content = "\n".join(f"{key}: {value}" for key, value in food.items() if value)
@@ -563,35 +645,35 @@ def generate_food_recommendations(filtered, profile, top_k=5):
         profile_embed = embd.embed_query(profile)
         scored_embed = [(food, cosine_similarity(profile_embed, food_embed)) for food, food_embed in embedded_food]
         top_dishes = sorted(scored_embed, key=lambda x: x[1], reverse=True)[:top_k]
-        return [dish for dish, _ in top_dishes]
+        sampled = [dish for dish, _ in top_dishes]
 
-    else:
-        # Clean and sort
-        filtered_clean = [
-            item for item in filtered
-            if parse_average_price(item["Price"]) is not None
-        ]
-        
-        sorted_food = sorted(
-            filtered_clean,
-            key=lambda x: parse_average_price(x["Price"])
-        )
-
-        n = len(sorted_food)
-        if n == 0:
-            return []
-        step = max(1, n // top_k)
-        sampled = [random.choice(sorted_food[i:i+step]) for i in range(0, n, step)][:top_k]
-
-        return sampled 
+    return sampled, none_found
 
 
 def ask_food_ai(question, data, field_map):
     # start_main = time.time()
-    parsed_query = food_query_analyzer(question)
-    filtered = filter_food(data=data, model_instance=parsed_query, field_map=field_map)
-    profile = create_food_taste_profile(question)
-    recommendations = generate_food_recommendations(filtered, profile)
+
+    is_descriptive = True
+    intent = food_intent_analyzer(question)
+    if intent == "pairing":
+        parsed_query = food_query_analyzer(question)
+        filtered = filter_food(data=data, model_instance=parsed_query, field_map=field_map)
+        profile = create_food_taste_profile(question)
+        response, none_found = generate_food_recommendations(filtered, profile)
+        is_descriptive = False
+
+    if intent == "description":
+        none_found = True
+        """generate food body and flavour profile
+        """
+        response = llm.invoke(f"""
+        You are a master-level chef and food data expert.
+        Your task is to create a short flavor description of the food (1-2 sentences) and a hypothetical, ideal food profile in the form of structured metadata.
+        Keep your response concise and focused on the dish's key attributes.
+                                   
+        User Query: {question.strip()}
+
+""")
 
     # Print timing summary
     # total_time = round(time.time() - start_main, 4)
@@ -602,25 +684,23 @@ def ask_food_ai(question, data, field_map):
         
     # print(f"  Total time: {total_time} seconds")
     
-    return recommendations
+    return response, is_descriptive, none_found
 
 
-def generate_recommendations(query: str):
+def generate_query_response(query: str):
     # Case 1: user looking for wine recommendations
     if recommend_wine(query):
-        recommendations = ask_wine_ai(question=query, data=wine_json, field_map=WINE_FIELD_MAP)
-        if recommendations == None:
+        response, is_descriptive, none_found = ask_wine_ai(question=query, data=wine_json, field_map=WINE_FIELD_MAP)
+        if response == None:
             print("No recommendations found")
-            return 
         
     # Case 2: user looking for food recommendations
     else: 
-        recommendations = ask_food_ai(question=query, data = food_json, field_map = FOOD_FIELD_MAP)
-        if recommendations == None:
+        response, is_descriptive, none_found = ask_food_ai(question=query, data = food_json, field_map = FOOD_FIELD_MAP)
+        if response == None:
             print("No recommendation found")
-            return
 
-    return recommendations
+    return response, is_descriptive, none_found
 
 
 # RAG Instruction Prompt and Functions
@@ -632,7 +712,8 @@ Focus only on positive pairing notes. Keep each explanation to two sentences or 
 
 def retrieve_context(query: str, retriever, k=5):
     docs = retriever.invoke(query)
-    context = "\n".join([doc.page_content for doc in docs])
+    context = [doc.page_content for doc in docs]
+    # print(f"Sources:\n{context}")
     return context
 
 
@@ -658,26 +739,40 @@ Explain the pairing or recommendation:"""
 
 def ask_wine_secret(query, retriever, llm, top_k=5):
     # optional: can add functionality to access all database info about each recommended product
-    recommendations_list = [product["Product Name"] for product in generate_recommendations(query)]
-    context = retrieve_context(query, retriever, k=top_k)
-    results = generate_reasoning(query=query, item_list=recommendations_list, context=context, llm=llm)
-    return results
+    query_response, is_descriptive, none_found = generate_query_response(query)
+
+    # Case 1: if the query is descriptive, return empty context and response
+    if is_descriptive:
+        return [], query_response, [], True
+    
+    # Case 2: if the query is a recommendation, retrieve context and generate reasoning
+    else:
+        if ( none_found ):
+            print("No product in our current database matches your query. However, we have provided some relevant recommendations.")
+
+        # extract recommended product names and variant IDs from the response
+        recommendations_list = [product["Product Name"] for product in query_response]
+        variant_ids = [int(product["VariantID"]) for product in query_response]
+        context = retrieve_context(query=query, retriever=retriever, k=top_k)
+        results = generate_reasoning(query=query, item_list=recommendations_list, context=context, llm=llm)
+        return context, results, variant_ids, False
     
 
 def query_prompt(user_query: Optional[str] = None) -> QueryResponse:
-    global llm, retriever, nlp_textcat, nlp_ner_wine, nlp_ner_food, wine_json, food_json
+    global llm, retriever, nlp_textcat, nlp_textcat_wine_intent, nlp_textcat_food_intent, nlp_ner_wine, nlp_ner_food, wine_json, food_json
     
     llm = setup_llm()
-    retriever, nlp_textcat, nlp_ner_wine, nlp_ner_food, wine_json, food_json = rag_system_setup()
+    retriever, nlp_textcat, nlp_textcat_wine_intent, nlp_textcat_food_intent, nlp_ner_wine, nlp_ner_food, wine_json, food_json = rag_system_setup()
     
     if not user_query:
-        user_query = input("Ask a question about wine-food pairing: ")
-    response_text = ask_wine_secret(user_query, retriever=retriever, llm=llm, top_k=5)
-    sources = [] # Placeholder for sources, not yet implemented
+        user_query = input("How can I help?\n")
+    sources, response_text, variant_id, is_descriptive = ask_wine_secret(user_query, retriever=retriever, llm=llm, top_k=5)
 
     return QueryResponse(
         query_text=user_query,
         response_text=response_text,
+        variant_id=variant_id,
+        is_descriptive=is_descriptive,
         sources=sources
     )
 
@@ -685,5 +780,13 @@ def query_prompt(user_query: Optional[str] = None) -> QueryResponse:
 if __name__ == "__main__":
     rag_system_setup()
     result = query_prompt()
-    print("\n\n".join([f"{product['item']}: {product['explanation']}" for product in result])) 
 
+    if ( result.is_descriptive ):
+        print(f"Descriptive response: {result.response_text}")
+
+    else:
+        print("\n\n".join([f"Recommended products: \n{product['item']}: {product['explanation']}" for product in result.response_text])) 
+        # uncomment to print sources
+        print(f"\nSources\n: {result.sources}")
+
+        print(f"\nVariant IDs: {result.variant_id}")

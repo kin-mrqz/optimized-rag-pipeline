@@ -5,6 +5,10 @@ import uuid
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+print("Loading .env from:", env_path)
+load_dotenv(dotenv_path=env_path)
 
 TABLE_NAME = os.environ.get("TABLE_NAME", "RagQueryTable")
 
@@ -17,9 +21,10 @@ class QueryModel(BaseModel):
         default_factory = lambda: int(time.time())
     )
     query_text: str
-    answer_text: Optional[str] = None
+    answer_text: List[dict] = None
+    variant_id: List[int] = None
     sources: List[str] = Field(default_factory=list) 
-    # note: retreived document sources not yet enabled in RAG feature
+    is_descriptive: bool = False  
     is_complete: bool = False
 
 
@@ -27,7 +32,8 @@ class QueryModel(BaseModel):
     @classmethod
     def get_table(cls: "QueryModel") -> boto3.resource:
         """Get the DynamoDB table resource."""
-        dynamodb = boto3.resource("dynamodb")
+        AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
+        dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
         return dynamodb.Table(TABLE_NAME)
     
     def put_item(self):

@@ -8,6 +8,8 @@ def rag_system_setup():
     nlp_textcat = spacy.load("spacy_models/textcat_model")
     nlp_ner_wine = spacy.load("spacy_models/ner_wine_model")
     nlp_ner_food = spacy.load("spacy_models/ner_food_model")
+    nlp_textcat_food_intent = spacy.load("spacy_models/food_intent_model")
+    nlp_textcat_wine_intent = spacy.load("spacy_models/wine_intent_model")
 
     persist_dir = "chroma_db"
     if os.path.exists(persist_dir):
@@ -25,4 +27,4 @@ def rag_system_setup():
     wine_json = wine_df.to_dict(orient="records")
     food_json = food_df.to_dict(orient="records")
     
-    return retriever, nlp_textcat, nlp_ner_wine, nlp_ner_food, wine_json, food_json
+    return retriever, nlp_textcat, nlp_textcat_wine_intent, nlp_textcat_food_intent,nlp_ner_wine, nlp_ner_food, wine_json, food_json

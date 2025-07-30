@@ -28,6 +28,7 @@ ENV IS_USING_IMAGE_RUNTIME=True
 # Copy the source code into the container
 # Ensure the directory structure matches the Lambda function's expectations
 COPY "src/*" ${LAMBDA_TASK_ROOT}
+COPY .env ${LAMBDA_TASK_ROOT}/.env
 COPY "src/chroma_db" ${LAMBDA_TASK_ROOT}/chroma_db
 COPY "src/spacy_models" ${LAMBDA_TASK_ROOT}/spacy_models
 COPY "src/data/resources/" ${LAMBDA_TASK_ROOT}/data/resources/
