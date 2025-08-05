@@ -48,7 +48,7 @@ image/
 - You have **AWS CLI installed and configured** via:
   ```bash
   aws configure
-````
+  ```
 
 * AWS bootstrap and key pair generation are already done.
 
