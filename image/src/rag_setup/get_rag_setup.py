@@ -5,13 +5,13 @@ from rag_setup.get_chroma_db import load_vectorstore
 
 
 def rag_system_setup():
-    nlp_textcat = spacy.load("spacy_models/textcat_model")
-    nlp_ner_wine = spacy.load("spacy_models/ner_wine_model")
-    nlp_ner_food = spacy.load("spacy_models/ner_food_model")
-    nlp_textcat_food_intent = spacy.load("spacy_models/food_intent_model")
-    nlp_textcat_wine_intent = spacy.load("spacy_models/wine_intent_model")
+    nlp_textcat = spacy.load("src/spacy_models/textcat_model")
+    nlp_ner_wine = spacy.load("src/spacy_models/ner_wine_model")
+    nlp_ner_food = spacy.load("src/spacy_models/ner_food_model")
+    nlp_textcat_food_intent = spacy.load("src/spacy_models/food_intent_model")
+    nlp_textcat_wine_intent = spacy.load("src/spacy_models/wine_intent_model")
 
-    persist_dir = "chroma_db"
+    persist_dir = "src/chroma_db"
     if os.path.exists(persist_dir):
         vectorstore = load_vectorstore()
     else:
@@ -20,8 +20,8 @@ def rag_system_setup():
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-    wine_data = "data/resources/wine_data.csv"
-    food_data = "data/resources/food_data.csv"
+    wine_data = "src/data/resources/wine_data.csv"
+    food_data = "src/data/resources/food_data.csv"
     wine_df = pd.read_csv(wine_data)
     food_df = pd.read_csv(food_data)
     wine_json = wine_df.to_dict(orient="records")

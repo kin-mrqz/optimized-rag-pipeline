@@ -1,39 +1,30 @@
-FROM public.ecr.aws/lambda/python:3.13
+FROM python:3.13-slim
 
-# Install gcc, g++, and make to support builds
-RUN dnf install -y gcc gcc-c++ make
+# Set working directory
+WORKDIR /app/src
 
-# Upgrade pip to latest to access newest wheels
+# Install gcc, g++, and make using apt (dnf doesn't exist in Debian-based images)
+RUN apt-get update && apt-get install -y gcc g++ make
+
+# Upgrade pip to latest version
 RUN python3 -m pip install --upgrade pip
 
-RUN pip install spacy
+# Install key Python dependencies first
+RUN pip install pysqlite3-binary numpy pandas spacy
 
-# Copy requirements file into Lambda task root
-COPY requirements.txt ${LAMBDA_TASK_ROOT}
-
-# Install pysqlite3-binary first if needed
-RUN pip install pysqlite3-binary
-
-# Install numpy and pandas first to ensure their wheels are used
-RUN pip install --upgrade numpy pandas
-
-# Then install remaining dependencies including spacy
+# Copy requirements file and install remaining dependencies
+COPY requirements.txt .
 RUN pip install --upgrade -r requirements.txt
 
-# for local testing
-EXPOSE 8000 
-
+# Set environment variable
 ENV IS_USING_IMAGE_RUNTIME=True
 
-# Copy the source code into the container
-# Ensure the directory structure matches the Lambda function's expectations
-COPY "src/*" ${LAMBDA_TASK_ROOT}
-COPY .env ${LAMBDA_TASK_ROOT}/.env
-COPY "src/chroma_db" ${LAMBDA_TASK_ROOT}/chroma_db
-COPY "src/spacy_models" ${LAMBDA_TASK_ROOT}/spacy_models
-COPY "src/data/resources/" ${LAMBDA_TASK_ROOT}/data/resources/
-COPY "src/rag_setup" ${LAMBDA_TASK_ROOT}/rag_setup
-COPY "src/rag_setup/get_chroma_db.py" ${LAMBDA_TASK_ROOT}/rag_setup/get_chroma_db.py
-COPY "src/rag_setup/get_embedding.py" ${LAMBDA_TASK_ROOT}/rag_setup/get_embedding.py
-COPY "src/rag_setup/get_rag_setup.py" ${LAMBDA_TASK_ROOT}/rag_setup/get_rag_setup.py
-COPY "src/main.py" ${LAMBDA_TASK_ROOT}/main.py
+# Copy everything exactly as is to /app
+COPY . .
+COPY .env /app/.env
+
+# Expose port your app uses
+EXPOSE 8000
+
+# Default command to run your app
+CMD ["python", "src/api_app_handler.py"]

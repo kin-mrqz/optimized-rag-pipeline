@@ -4,7 +4,7 @@ import shutil
 from langchain_chroma import Chroma
 from rag_setup.get_embedding import get_embedding_model
 
-CHROMA_PATH = os.environ.get("CHROMA_PATH", "chroma_db")
+CHROMA_PATH = os.environ.get("CHROMA_PATH", "src/chroma_db")
 IS_USING_IMAGE_RUNTIME = os.environ.get("IS_USING_IMAGE_RUNTIME", "False").lower() == "true"
 CHROMA_DB_INSTANCE = None
 
